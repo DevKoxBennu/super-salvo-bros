@@ -533,7 +533,7 @@
     const soundBtn = document.getElementById("sound-btn");
     const slots = [...document.querySelectorAll(".slot")];
 
-    const flags = { key: false, cart: false, tv: false, baby: false, muted: false };
+    const flags = { key: false, cart: false, tv: false, baby: false, muted: false, clue: 0, heard: "" };
     let phase = "title";
     let audio = { ctx: null, timer: 0, mode: null, master: null };
     let roomToken = 0;
@@ -601,6 +601,8 @@
         flags.cart = false;
         flags.tv = false;
         flags.baby = false;
+        flags.clue = 0;
+        flags.heard = "";
         room.dataset.src = "";
         stopMusic();
         world.textContent = "WORLD 1-1";
@@ -618,6 +620,8 @@
       ensureAudio();
       playMusic("calm");
       blip([392, 523, 659]);
+      flags.clue = 0;
+      flags.heard = "";
       go("hunt");
       setRoom("assets/scene-vicente.jpg", "Vicente en la sala, junto al cofre, la tele y el robot.");
       world.textContent = "WORLD 1-1";
@@ -634,6 +638,8 @@
         return;
       }
       flags.key = true;
+      flags.clue = 4;
+      flags.heard = "";
       stage.classList.add("has-key");
       setGoal("Objetivo: abre el cofre.");
       blip([523, 659, 784]);
@@ -642,7 +648,7 @@
 
     function openChest() {
       if (!flags.key) {
-        say("COFRE", "Está cerrado. Sigue las pistas hasta encontrar la llave.");
+        say("COFRE", "Está cerrado. " + nudge(chains.hunt));
         return;
       }
       blip([440, 554, 659, 880]);
@@ -659,6 +665,8 @@
 
     function nextLevel() {
       stage.classList.remove("chest-glow", "has-key", "show-toys");
+      flags.clue = 0;
+      flags.heard = "";
       go("level2");
       setRoom("assets/scene-duda.jpg", "Vicente y Bruno en la sala, antes de comenzar la aventura.");
       world.textContent = "WORLD 1-2";
@@ -676,6 +684,8 @@
         return;
       }
       flags.cart = true;
+      flags.clue = 4;
+      flags.heard = "";
       stage.classList.add("has-cart");
       setGoal("Objetivo: enciende el televisor.");
       blip([494, 659]);
@@ -685,7 +695,7 @@
 
     function powerTv() {
       if (!flags.cart) {
-        say("TV", "Sin el cartucho no enciende. Sigue las pistas de la sala.");
+        say("TV", "Sin el cartucho no enciende. " + nudge(chains.level2));
         return;
       }
       if (flags.tv) return;
@@ -755,25 +765,80 @@
       chest2: "El cofre puede esperar. Primero encuentren el cartucho."
     };
 
+    const chains = {
+      hunt: ["art", "tv", "console", "xbox"],
+      level2: ["lamp", "stereo", "dinos", "pillow"]
+    };
+    const nudgeText = {
+      art: "Mira los cuadros.",
+      tv: "Ahora mira la tele.",
+      console: "Ahora mira la consola.",
+      xbox: "Ahora prueba el control de la Xbox.",
+      lamp: "Mira la lámpara.",
+      stereo: "Ahora mira el equipo de música.",
+      dinos: "Ahora mira los dinosaurios.",
+      pillow: "Ahora revisa los cojines del sillón."
+    };
+
+    function nudge(order) {
+      const id = order[Math.min(flags.clue, order.length - 1)];
+      return nudgeText[id] || "Sigue la pista de ahora.";
+    }
+
+    function gateHint(id, order, book) {
+      const index = order.indexOf(id);
+      if (index < 0) return false;
+      if (index > flags.clue) {
+        say("PISTA", "Todavía no. " + nudge(order));
+        return true;
+      }
+      if (id === flags.heard) {
+        say("PISTA", book[id]);
+        return true;
+      }
+      if (index < flags.clue) {
+        say("PISTA", flags.clue >= order.length
+          ? "Esa pista ya la seguiste."
+          : "Esa pista ya la seguiste. " + nudge(order));
+        return true;
+      }
+      say("PISTA", book[id]);
+      if (id !== "xbox" && id !== "pillow") {
+        flags.heard = id;
+        flags.clue += 1;
+      }
+      return true;
+    }
+
     function showHint(id) {
-      if (phase === "hunt" && hints[id]) {
-        if (id === "chest" && flags.key) {
-          say("COFRE", "La llave encaja. Haz clic en el cofre para abrirlo.");
+      if (phase === "hunt" && (hints[id] || id === "chest")) {
+        if (id === "chest") {
+          say(flags.key ? "COFRE" : "PISTA", flags.key
+            ? "La llave encaja. Haz clic en el cofre para abrirlo."
+            : "El cofre está cerrado. " + nudge(chains.hunt));
           return;
         }
-        say("PISTA", hints[id]);
+        gateHint(id, chains.hunt, hints);
         return;
       }
-      if (phase === "level2" && hints2[id]) {
+      if (phase === "level2" && (hints2[id] || id === "tv2" || id === "chest2")) {
         if (id === "pillow" && flags.cart) {
           say("BRUNO", "El cartucho ya está con ustedes. Enciendan el televisor.");
           return;
         }
-        if (id === "tv2" && flags.cart) {
-          say("TV", "Ya tienen el cartucho. Haz clic en la tele para encenderla.");
+        if (id === "tv2") {
+          say("TV", flags.cart
+            ? "Ya tienen el cartucho. Haz clic en la tele para encenderla."
+            : "La tele sigue apagada. " + nudge(chains.level2));
           return;
         }
-        say("PISTA", hints2[id]);
+        if (id === "chest2") {
+          say("COFRE", flags.cart
+            ? "Primero enciendan el televisor."
+            : "El cofre puede esperar. " + nudge(chains.level2));
+          return;
+        }
+        gateHint(id, chains.level2, hints2);
       }
     }
 
@@ -788,9 +853,15 @@
         showHint(id);
         return;
       }
-      if (id === "xbox" && phase === "hunt") return findKey();
+      if (id === "xbox" && phase === "hunt") {
+        if (flags.clue < chains.hunt.indexOf("xbox")) return showHint("xbox");
+        return findKey();
+      }
       if (id === "chest" && phase === "hunt") return openChest();
-      if (id === "pillow" && (phase === "level2" || phase === "quake")) return findCart();
+      if (id === "pillow" && (phase === "level2" || phase === "quake")) {
+        if (phase === "level2" && flags.clue < chains.level2.indexOf("pillow")) return showHint("pillow");
+        return findCart();
+      }
       if (id === "tv2" && (phase === "level2" || phase === "quake")) return powerTv();
       if ((id === "mystic" || id === "chest2") && phase === "quake") return openMystic();
       if (id === "chest2" && phase === "level2") say("COFRE", "Ahora no. Primero conecten el juego al televisor.");
